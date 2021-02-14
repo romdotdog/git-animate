@@ -10,16 +10,27 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onCommand:git-animate.helloWorld"
+		"onCommand:git-animate.animate"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
-				"command": "git-animate.helloWorld",
-				"title": "Hello World"
+				"command": "git-animate.animate",
+				"category": "Animate",
+				"icon": "$(play-circle)",
+				"title": "Visualize repository"
 			}
-		]
+		],
+		"menus": {
+			"scm/title": [
+				{
+					"command": "git-animate.animate",
+					"when": "config.git.enabled && !git.missing && gitOpenRepositoryCount != 0",
+					"group": "3_footer"
+				}
+			]
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
@@ -41,5 +52,8 @@
 		"mocha": "^7.1.2",
 		"typescript": "^3.8.3",
 		"vscode-test": "^1.3.0"
+	},
+	"dependencies": {
+		"simple-git": "^2.34.2"
 	}
 }

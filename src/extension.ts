@@ -1,27 +1,44 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
+import simpleGit, { SimpleGit, SimpleGitOptions } from "simple-git";
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+	let disposable = vscode.commands.registerCommand(
+		"git-animate.animate",
+		async () => {
+			// workbench.action.newWindow
+			if (
+				!vscode.workspace.workspaceFolders ||
+				!vscode.workspace.workspaceFolders.length
+			) {
+				return vscode.window.showWarningMessage(
+					`No repository is currently opened!`
+				);
+			}
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "git-animate" is now active!');
+			if (vscode.workspace.workspaceFolders.length !== 1) {
+				return vscode.window.showWarningMessage(
+					`Please only have one folder in your workspace.`
+				);
+			}
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('git-animate.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
+			const cwd = vscode.workspace.workspaceFolders[0].uri.fsPath;
+			const gitpath =
+				vscode.workspace.getConfiguration("git").get<string>("path") || "git";
 
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from git-animate!');
-	});
+			const options: SimpleGitOptions = {
+				baseDir: cwd,
+				binary: gitpath,
+				maxConcurrentProcesses: 6,
+				config: []
+			};
+
+			const git: SimpleGit = simpleGit(options);
+			const log = await git.log();
+			vscode.window.showInformationMessage(log.total + " commits found..");
+		}
+	);
 
 	context.subscriptions.push(disposable);
 }
 
-// this method is called when your extension is deactivated
 export function deactivate() {}
