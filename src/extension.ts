@@ -87,7 +87,7 @@ export function activate(context: vscode.ExtensionContext) {
 					const commit = commits[i];
 					console.log(`Doing commit ${commit.hash}`);
 
-					//await sleep(2000);
+					await sleep(2000);
 
 					let args = [
 						"--no-pager",
@@ -123,10 +123,12 @@ export function activate(context: vscode.ExtensionContext) {
 						});
 					});
 
-					console.log(stdout);
+					// console.log(stdout);
 					const patch = parseGitPatch(stdout);
-					console.log(`Parsed with ${patch.files.length} files changed.`);
+					// console.log(`Parsed with ${patch.files.length} files changed.`);
 
+					let linesDeleted = 0;
+					let linesAdded = 0;
 					for (const file of patch.files) {
 						//await sleep(700);
 
@@ -184,11 +186,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 							await sleep(Math.min(300, jump * 5));
 
-							const lineNumber = line.lineNumber - 2; // Confusion
+							line.lineNumber--; // Patch is ahead by one line
+							let lineNumber = line.lineNumber - 1; // Position is zero-based
 							if (line.added) {
 								const [, leadingWhite, lineContent] = (line.line + "\n").match(
 									/^(\s*)(.*)/s
 								)!;
+
+								console.log(`add "${lineContent}" at line ${line.lineNumber}`);
 
 								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 									editBuilder.insert(
@@ -197,7 +202,13 @@ export function activate(context: vscode.ExtensionContext) {
 									);
 								});
 
-								const chunkLength = 3;
+								const pos = new vscode.Position(
+									lineNumber,
+									leadingWhite.length
+								);
+								editor.selection = new vscode.Selection(pos, pos);
+
+								const chunkLength = 4;
 								const chunks = chunk(lineContent.split(""), chunkLength);
 
 								// Insertion
@@ -219,23 +230,35 @@ export function activate(context: vscode.ExtensionContext) {
 
 									await sleep(1);
 								}
+
+								linesAdded++;
 							} else {
+								console.log(
+									`remove line ${line.lineNumber} - ${
+										linesDeleted - linesAdded
+									}`
+								);
+								lineNumber -= linesDeleted - linesAdded;
 								const range = new vscode.Range(
 									new vscode.Position(lineNumber, 0),
 									new vscode.Position(lineNumber + 1, 0)
 								);
 
-								editor.selections[0] = new vscode.Selection(
-									range.start,
-									range.end
-								);
+								editor.selection = new vscode.Selection(range.start, range.end);
 
-								await sleep(2);
+								await sleep(100);
+
+								//j++;
+								//if (j === 3) {
+								//	return;
+								//}
 
 								// Delete
 								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 									editBuilder.delete(range);
 								});
+
+								linesDeleted++;
 							}
 						}
 					}
