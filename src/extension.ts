@@ -176,7 +176,7 @@ export function activate(context: vscode.ExtensionContext) {
 								visibleRange.end.line < line.lineNumber ||
 								visibleRange.start.line > line.lineNumber
 							) {
-								const targetLine = Math.max(line.lineNumber - 20, 0);
+								const targetLine = Math.max(line.lineNumber - 20, -1);
 
 								await vscode.commands.executeCommand("editorScroll", {
 									to: visibleRange.start.line > targetLine ? "up" : "down",
