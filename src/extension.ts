@@ -87,8 +87,6 @@ export function activate(context: vscode.ExtensionContext) {
 					const commit = commits[i];
 					console.log(`Doing commit ${commit.hash}`);
 
-					await sleep(2000);
-
 					let args = [
 						"--no-pager",
 						"format-patch",
@@ -123,15 +121,9 @@ export function activate(context: vscode.ExtensionContext) {
 						});
 					});
 
-					// console.log(stdout);
 					const patch = parseGitPatch(stdout);
-					// console.log(`Parsed with ${patch.files.length} files changed.`);
 
-					let linesDeleted = 0;
-					let linesAdded = 0;
 					for (const file of patch.files) {
-						//await sleep(700);
-
 						let doc = documents[file.beforeName];
 						if (!doc) {
 							doc = await createDocument(file.beforeName);
@@ -164,6 +156,8 @@ export function activate(context: vscode.ExtensionContext) {
 							editor = newEditor;
 						}
 
+						let linesDeleted = 0;
+						let linesAdded = 0;
 						for (const line of file.modifiedLines) {
 							const jump = Math.abs(
 								editor.selection.active.line - line.lineNumber
@@ -192,8 +186,6 @@ export function activate(context: vscode.ExtensionContext) {
 								const [, leadingWhite, lineContent] = (line.line + "\n").match(
 									/^(\s*)(.*)/s
 								)!;
-
-								console.log(`add "${lineContent}" at line ${line.lineNumber}`);
 
 								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 									editBuilder.insert(
@@ -233,11 +225,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 								linesAdded++;
 							} else {
-								console.log(
-									`remove line ${line.lineNumber} - ${
-										linesDeleted - linesAdded
-									}`
-								);
 								lineNumber -= linesDeleted - linesAdded;
 								const range = new vscode.Range(
 									new vscode.Position(lineNumber, 0),
@@ -247,11 +234,6 @@ export function activate(context: vscode.ExtensionContext) {
 								editor.selection = new vscode.Selection(range.start, range.end);
 
 								await sleep(100);
-
-								//j++;
-								//if (j === 3) {
-								//	return;
-								//}
 
 								// Delete
 								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
