@@ -6,10 +6,19 @@ import simpleGit, {
 	SimpleGitOptions
 } from "simple-git";
 import parseGitPatch = require("parse-git-patch");
-
-import { basename } from "path";
-
 import { spawn } from "child_process";
+
+function chunk<T>(arr: T[], len: number): T[][] {
+	var chunks = [],
+		i = 0,
+		n = arr.length;
+
+	while (i < n) {
+		chunks.push(arr.slice(i, (i += len)));
+	}
+
+	return chunks;
+}
 
 function sleep(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,7 +87,7 @@ export function activate(context: vscode.ExtensionContext) {
 					const commit = commits[i];
 					console.log(`Doing commit ${commit.hash}`);
 
-					await sleep(2000);
+					//await sleep(2000);
 
 					let args = [
 						"--no-pager",
@@ -119,7 +128,7 @@ export function activate(context: vscode.ExtensionContext) {
 					console.log(`Parsed with ${patch.files.length} files changed.`);
 
 					for (const file of patch.files) {
-						await sleep(700);
+						//await sleep(700);
 
 						let doc = documents[file.beforeName];
 						if (!doc) {
@@ -175,6 +184,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 							await sleep(Math.min(300, jump * 5));
 
+							const lineNumber = line.lineNumber - 2; // Confusion
 							if (line.added) {
 								const [, leadingWhite, lineContent] = (line.line + "\n").match(
 									/^(\s*)(.*)/s
@@ -182,38 +192,50 @@ export function activate(context: vscode.ExtensionContext) {
 
 								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 									editBuilder.insert(
-										new vscode.Position(line.lineNumber, 0),
+										new vscode.Position(lineNumber, 0),
 										leadingWhite
 									);
 								});
 
+								const chunkLength = 3;
+								const chunks = chunk(lineContent.split(""), chunkLength);
+
 								// Insertion
 								for (
 									let charIndex = 0;
-									charIndex < lineContent.length;
+									charIndex < chunks.length;
 									charIndex++
 								) {
-									const char = lineContent[charIndex];
+									const chunk = chunks[charIndex];
 									await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 										editBuilder.insert(
-											new vscode.Position(line.lineNumber, charIndex),
-											char
+											new vscode.Position(
+												lineNumber,
+												leadingWhite.length + charIndex * chunkLength
+											),
+											chunk.join("")
 										);
 									});
 
 									await sleep(1);
 								}
 							} else {
+								const range = new vscode.Range(
+									new vscode.Position(lineNumber, 0),
+									new vscode.Position(lineNumber + 1, 0)
+								);
+
+								editor.selections[0] = new vscode.Selection(
+									range.start,
+									range.end
+								);
+
+								await sleep(2);
+
 								// Delete
 								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
-									editBuilder.delete(
-										new vscode.Range(
-											new vscode.Position(line.lineNumber, 0),
-											new vscode.Position(line.lineNumber, line.line.length)
-										)
-									);
+									editBuilder.delete(range);
 								});
-								await sleep(50);
 							}
 						}
 					}
