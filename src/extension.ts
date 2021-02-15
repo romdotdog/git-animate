@@ -62,22 +62,16 @@ export function activate(context: vscode.ExtensionContext) {
 
 				vscode.languages.setTextDocumentLanguage(commitDoc, "html");
 				const commitEditor = await vscode.window.showTextDocument(commitDoc, {
-					viewColumn: vscode.ViewColumn.Beside,
+					viewColumn: vscode.ViewColumn.Two,
 					preview: false
 				});
 
-				const editors: Record<string, vscode.TextEditor> = {};
+				const documents: Record<string, vscode.TextDocument> = {};
 
-				async function createEditor(path: string) {
-					const doc = await vscode.workspace.openTextDocument(
-						vscode.Uri.parse(`untitled:${basename(path).split(".")[0]}`)
-					);
-
-					return (editors[path] = await vscode.window.showTextDocument(doc, {
-						viewColumn: vscode.ViewColumn.Active,
-						preserveFocus: true,
-						preview: false
-					}));
+				async function createDocument(path: string) {
+					return (documents[path] = await vscode.workspace.openTextDocument(
+						vscode.Uri.parse(`untitled:${path}`)
+					));
 				}
 
 				console.log(`Got ${log.all.length} commits in log.`);
@@ -87,6 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
 				for (let i = 0; i < commits.length; i++) {
 					const commit = commits[i];
 					console.log(`Doing commit ${commit.hash}`);
+					await sleep(2000);
 
 					// Add commit
 					commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
@@ -96,10 +91,13 @@ export function activate(context: vscode.ExtensionContext) {
 						);
 					});
 
-					let args =
-						i === 0
-							? ["--no-pager", "format-patch", "--stdout", "-1", commit.hash]
-							: ["--no-pager", "diff", log.all[i - 1].hash, commit.hash];
+					let args = [
+						"--no-pager",
+						"format-patch",
+						"--stdout",
+						"-1",
+						commit.hash
+					];
 
 					console.log("Executing `git " + args.join(" ") + "`");
 
@@ -132,13 +130,22 @@ export function activate(context: vscode.ExtensionContext) {
 					console.log(`Parsed with ${patch.files.length} files changed.`);
 
 					for (const file of patch.files) {
-						let editor = editors[file.beforeName];
-						if (!editor) {
-							editor = await createEditor(file.beforeName);
+						let doc = documents[file.beforeName];
+						if (!doc) {
+							doc = await createDocument(file.beforeName);
 						}
 
+						let editor = await vscode.window.showTextDocument(doc, {
+							viewColumn: vscode.ViewColumn.One
+						});
+
 						if (file.beforeName !== file.afterName) {
-							const newEditor = await createEditor(file.afterName);
+							const newEditor = await vscode.window.showTextDocument(
+								await createDocument(file.afterName),
+								{
+									viewColumn: vscode.ViewColumn.One
+								}
+							);
 
 							newEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 								editBuilder.insert(
@@ -155,7 +162,6 @@ export function activate(context: vscode.ExtensionContext) {
 							editor = newEditor;
 						}
 
-						await vscode.window.showTextDocument(editor.document); // Focus
 						for (const line of file.modifiedLines) {
 							const jump = Math.abs(
 								editor.selection.active.line - line.lineNumber
