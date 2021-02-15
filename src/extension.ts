@@ -60,11 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
 					"workbench.action.closeAllEditors"
 				);
 
-				vscode.languages.setTextDocumentLanguage(commitDoc, "html");
-				const commitEditor = await vscode.window.showTextDocument(commitDoc, {
-					viewColumn: vscode.ViewColumn.Two,
-					preview: false
-				});
+				vscode.languages.setTextDocumentLanguage(commitDoc, "xml");
 
 				const documents: Record<string, vscode.TextDocument> = {};
 
@@ -81,15 +77,21 @@ export function activate(context: vscode.ExtensionContext) {
 				for (let i = 0; i < commits.length; i++) {
 					const commit = commits[i];
 					console.log(`Doing commit ${commit.hash}`);
-					await sleep(2000);
 
 					// Add commit
+					const commitEditor = await vscode.window.showTextDocument(commitDoc, {
+						viewColumn: vscode.ViewColumn.Two,
+						preview: false
+					});
+
 					commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 						editBuilder.insert(
 							new vscode.Position(commitEditor.document.lineCount, 0),
 							`<${commit.author_name}>: ${commit.message}\n\n`
 						);
 					});
+
+					await sleep(2000);
 
 					let args = [
 						"--no-pager",
@@ -130,6 +132,8 @@ export function activate(context: vscode.ExtensionContext) {
 					console.log(`Parsed with ${patch.files.length} files changed.`);
 
 					for (const file of patch.files) {
+						await sleep(700);
+
 						let doc = documents[file.beforeName];
 						if (!doc) {
 							doc = await createDocument(file.beforeName);
@@ -167,17 +171,42 @@ export function activate(context: vscode.ExtensionContext) {
 								editor.selection.active.line - line.lineNumber
 							);
 
+							const visibleRange = editor.visibleRanges[0];
+							if (
+								visibleRange.end.line < line.lineNumber ||
+								visibleRange.start.line > line.lineNumber
+							) {
+								const targetLine = Math.max(line.lineNumber - 20, 0);
+
+								await vscode.commands.executeCommand("editorScroll", {
+									to: visibleRange.start.line > targetLine ? "up" : "down",
+									by: "line",
+									value: Math.abs(visibleRange.start.line - targetLine),
+									revealCursor: false
+								});
+							}
+
 							await sleep(Math.min(300, jump * 5));
 
 							if (line.added) {
-								const lineWithNL = line.line + "\n";
+								const [, leadingWhite, lineContent] = (line.line + "\n").match(
+									/^(\s*)(.*)/s
+								)!;
+
+								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
+									editBuilder.insert(
+										new vscode.Position(line.lineNumber, 0),
+										leadingWhite
+									);
+								});
+
 								// Insertion
 								for (
 									let charIndex = 0;
-									charIndex < lineWithNL.length;
+									charIndex < lineContent.length;
 									charIndex++
 								) {
-									const char = lineWithNL[charIndex];
+									const char = lineContent[charIndex];
 									await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 										editBuilder.insert(
 											new vscode.Position(line.lineNumber, charIndex),
