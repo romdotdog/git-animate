@@ -283,11 +283,25 @@ You're good to go now, happy animating!`;
 					});
 
 					if (file.deleted) {
+						await editor.document.save();
+						await vscode.commands.executeCommand(
+							"workbench.action.closeActiveEditor",
+							editor
+						);
+
 						await promises.unlink(fullPath);
 						continue;
 					}
 
 					if (file.beforeName !== file.afterName) {
+						await editor.document.save();
+						await vscode.commands.executeCommand(
+							"workbench.action.closeActiveEditor",
+							editor
+						);
+
+						delete documents[fullPath];
+
 						const newPath = join(playbackProject, file.afterName);
 						await promises.rename(fullPath, newPath);
 
@@ -296,18 +310,6 @@ You're good to go now, happy animating!`;
 							{
 								viewColumn: vscode.ViewColumn.One
 							}
-						);
-
-						newEditor.edit((editBuilder: vscode.TextEditorEdit) => {
-							editBuilder.insert(
-								new vscode.Position(0, 0),
-								editor.document.getText()
-							);
-						});
-
-						await vscode.commands.executeCommand(
-							"workbench.action.closeActiveEditor",
-							editor
 						);
 
 						editor = newEditor;
