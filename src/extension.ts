@@ -78,19 +78,6 @@ export function activate(context: vscode.ExtensionContext) {
 					const commit = commits[i];
 					console.log(`Doing commit ${commit.hash}`);
 
-					// Add commit
-					const commitEditor = await vscode.window.showTextDocument(commitDoc, {
-						viewColumn: vscode.ViewColumn.Two,
-						preview: false
-					});
-
-					commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
-						editBuilder.insert(
-							new vscode.Position(commitEditor.document.lineCount, 0),
-							`<${commit.author_name}>: ${commit.message}\n\n`
-						);
-					});
-
 					await sleep(2000);
 
 					let args = [
@@ -230,6 +217,19 @@ export function activate(context: vscode.ExtensionContext) {
 							}
 						}
 					}
+
+					// Add commit to log
+					const commitEditor = await vscode.window.showTextDocument(commitDoc, {
+						viewColumn: vscode.ViewColumn.Two,
+						preview: false
+					});
+
+					commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
+						editBuilder.insert(
+							new vscode.Position(commitEditor.document.lineCount, 0),
+							`<${commit.author_name}>: ${commit.message}\n\n`
+						);
+					});
 				}
 			} catch (err) {
 				console.error(err);
