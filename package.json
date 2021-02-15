@@ -10,7 +10,8 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onCommand:git-animate.animate"
+		"onCommand:git-animate.animate",
+		"onCommand:git-animate.start"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
@@ -20,6 +21,12 @@
 				"gitanimate.playbackFolder": {
 					"type": "string",
 					"default": "%appdata%/git-animate"
+				},
+				"gitanimate.defaultWorkspaceJSON": {
+					"type": "object",
+					"default": {
+						"editor.wordWrap": "on"
+					}
 				}
 			}
 		},

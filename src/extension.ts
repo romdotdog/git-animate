@@ -8,8 +8,9 @@ import simpleGit, {
 import parseGitPatch = require("parse-git-patch");
 import { spawn } from "child_process";
 
-import { join, relative, resolve, isAbsolute } from "path";
+import { join, relative, resolve, isAbsolute, dirname } from "path";
 import { promises } from "fs";
+import { config } from "process";
 
 function chunk<T>(arr: T[], len: number): T[][] {
 	var chunks = [],
@@ -99,6 +100,17 @@ You're good to go now, happy animating!`;
 				encoding: "utf8"
 			});
 
+			console.log("Making settings.json..");
+			await promises.mkdir(join(dest, ".vscode"));
+
+			const settings =
+				configuration.get<Record<string, any>>("defaultWorkspaceJSON") || {};
+
+			await promises.writeFile(
+				join(dest, ".vscode", "settings.json"),
+				JSON.stringify(settings)
+			);
+
 			console.log("Launching new instance of vscode..");
 			const destURI = vscode.Uri.file(dest);
 			const pick = await vscode.window.showQuickPick(["Yes", "No"], {
@@ -115,7 +127,6 @@ You're good to go now, happy animating!`;
 
 	let start = vscode.commands.registerCommand("git-animate.start", async () => {
 		try {
-			// workbench.action.newWindow
 			if (
 				!vscode.workspace.workspaceFolders ||
 				!vscode.workspace.workspaceFolders.length
@@ -133,7 +144,9 @@ You're good to go now, happy animating!`;
 
 			if (
 				!vscode.window.activeTextEditor ||
-				vscode.window.activeTextEditor.document.fileName !== ".gitanimate.md"
+				!vscode.window.activeTextEditor.document.fileName.match(
+					/\.gitanimate\.md/
+				)
 			) {
 				return vscode.window.showErrorMessage(
 					`.gitanimate.md should be focused when attempting playback.`
@@ -174,6 +187,9 @@ You're good to go now, happy animating!`;
 					new vscode.Range(new vscode.Position(0, 0), new vscode.Position(1, 0))
 				)
 				.trim(); // when running this command, editor should be focused on .gitanimate.md
+
+			// delete .gitanimate.md
+			await promises.unlink(vscode.window.activeTextEditor.document.uri.fsPath);
 
 			const playbackProject = vscode.workspace.workspaceFolders[0].uri.fsPath;
 
@@ -254,7 +270,10 @@ You're good to go now, happy animating!`;
 					let doc = documents[fullPath];
 
 					if (!doc) {
-						await promises.mkdir(fullPath, { recursive: true });
+						await promises.mkdir(
+							dirname(fullPath), // create all directories for the path
+							{ recursive: true }
+						);
 						await promises.writeFile(fullPath, "");
 						doc = await createDocument(fullPath);
 					}
