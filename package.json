@@ -14,12 +14,28 @@
 	],
 	"main": "./out/extension.js",
 	"contributes": {
+		"configuration": {
+			"title": "gitanimate",
+			"properties": {
+				"gitanimate.playbackFolder": {
+					"type": "string",
+					"default": "%temp%/git-animate"
+				}
+			}
+		},
 		"commands": [
 			{
 				"command": "git-animate.animate",
 				"category": "Animate",
 				"icon": "$(play-circle)",
 				"title": "Visualize repository"
+			},
+			{
+				"command": "git-animate.start",
+				"enablement": "resourceFilename =~ .gitanimate.md",
+				"category": "Animate",
+				"icon": "$(play-circle)",
+				"title": "Start animation"
 			}
 		],
 		"menus": {
