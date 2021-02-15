@@ -8,7 +8,7 @@ import simpleGit, {
 import parseGitPatch = require("parse-git-patch");
 import { spawn } from "child_process";
 
-import { join, relative, isAbsolute } from "path";
+import { join, relative, resolve, isAbsolute } from "path";
 import { promises } from "fs";
 
 function chunk<T>(arr: T[], len: number): T[][] {
@@ -55,19 +55,31 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const configuration = vscode.workspace.getConfiguration("gitanimate");
-			const playbackFolder = configuration.get<string>("playbackFolder");
+			let playbackFolder = configuration.get<string>("playbackFolder");
+
 			if (!playbackFolder) {
 				return vscode.window.showErrorMessage(
 					`gitanimate.playbackFolder is undefined.`
 				);
 			}
 
-			const dest = join(
-				playbackFolder,
-				vscode.workspace.workspaceFolders[0].name
+			// https://stackoverflow.com/questions/21363912/how-to-resolve-a-path-that-includes-an-environment-variable-in-nodejs
+			playbackFolder = playbackFolder.replace(
+				/%([^%]+)%/g,
+				(original, matched) => {
+					const r = process.env[matched];
+					return r ? r : "";
+				}
 			);
 
+			const dest = resolve(
+				join(playbackFolder, vscode.workspace.workspaceFolders[0].name)
+			);
+
+			console.log(dest);
+
 			await promises.rmdir(dest, { recursive: true });
+			console.log("Done clearing, now making directory..");
 			await promises.mkdir(dest, { recursive: true });
 
 			const cwd = vscode.workspace.workspaceFolders[0].uri.fsPath;
@@ -82,13 +94,24 @@ Make sure you're focused on this file, type \`CTRL+SHIFT+P\`, then select \`Anim
 
 You're good to go now, happy animating!`;
 
+			console.log("Making .gitanimate.md..");
 			await promises.writeFile(join(dest, ".gitanimate.md"), out, {
 				encoding: "utf8"
 			});
+
+			console.log("Launching new instance of vscode..");
+			const destURI = vscode.Uri.file(dest);
+			const pick = await vscode.window.showQuickPick(["Yes", "No"], {
+				placeHolder: "Open new window?"
+			});
+
+			vscode.commands.executeCommand(
+				"vscode.openFolder",
+				destURI,
+				pick === "Yes"
+			);
 		}
 	);
-
-	context.subscriptions.push(animate);
 
 	let start = vscode.commands.registerCommand("git-animate.start", async () => {
 		try {
@@ -118,13 +141,22 @@ You're good to go now, happy animating!`;
 			}
 
 			const configuration = vscode.workspace.getConfiguration("gitanimate");
-			const playbackFolder = configuration.get<string>("playbackFolder");
+			let playbackFolder = configuration.get<string>("playbackFolder");
 
 			if (!playbackFolder) {
 				return vscode.window.showErrorMessage(
 					`gitanimate.playbackFolder is undefined.`
 				);
 			}
+
+			// https://stackoverflow.com/questions/21363912/how-to-resolve-a-path-that-includes-an-environment-variable-in-nodejs
+			playbackFolder = playbackFolder.replace(
+				/%([^%]+)%/g,
+				(original, matched) => {
+					const r = process.env[matched];
+					return r ? r : "";
+				}
+			);
 
 			if (
 				!isChildOf(
@@ -143,6 +175,8 @@ You're good to go now, happy animating!`;
 				)
 				.trim(); // when running this command, editor should be focused on .gitanimate.md
 
+			const playbackProject = vscode.workspace.workspaceFolders[0].uri.fsPath;
+
 			const gitpath =
 				vscode.workspace.getConfiguration("git").get<string>("path") || "git";
 
@@ -156,19 +190,18 @@ You're good to go now, happy animating!`;
 			const git: SimpleGit = simpleGit(options);
 			const log = await git.log();
 
+			await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+
 			const commitDoc = await vscode.workspace.openTextDocument(
 				vscode.Uri.parse(`untitled:Commits`)
 			);
-
-			await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-
 			vscode.languages.setTextDocumentLanguage(commitDoc, "xml");
 
 			const documents: Record<string, vscode.TextDocument> = {};
 
 			async function createDocument(path: string) {
 				return (documents[path] = await vscode.workspace.openTextDocument(
-					vscode.Uri.parse(`untitled:${path}`)
+					vscode.Uri.parse(`file:${path}`)
 				));
 			}
 
@@ -217,18 +250,30 @@ You're good to go now, happy animating!`;
 				const patch = parseGitPatch(stdout);
 
 				for (const file of patch.files) {
-					let doc = documents[file.beforeName];
+					let fullPath = join(playbackProject, file.beforeName);
+					let doc = documents[fullPath];
+
 					if (!doc) {
-						doc = await createDocument(file.beforeName);
+						await promises.mkdir(fullPath, { recursive: true });
+						await promises.writeFile(fullPath, "");
+						doc = await createDocument(fullPath);
 					}
 
 					let editor = await vscode.window.showTextDocument(doc, {
 						viewColumn: vscode.ViewColumn.One
 					});
 
+					if (file.deleted) {
+						await promises.unlink(fullPath);
+						continue;
+					}
+
 					if (file.beforeName !== file.afterName) {
+						const newPath = join(playbackProject, file.afterName);
+						await promises.rename(fullPath, newPath);
+
 						const newEditor = await vscode.window.showTextDocument(
-							await createDocument(file.afterName),
+							await createDocument(newPath),
 							{
 								viewColumn: vscode.ViewColumn.One
 							}
@@ -247,6 +292,7 @@ You're good to go now, happy animating!`;
 						);
 
 						editor = newEditor;
+						fullPath = newPath;
 					}
 
 					let linesDeleted = 0;
@@ -329,6 +375,9 @@ You're good to go now, happy animating!`;
 							linesDeleted++;
 						}
 					}
+
+					// Save file
+					editor.document.save();
 				}
 
 				// Add commit to log
@@ -350,6 +399,7 @@ You're good to go now, happy animating!`;
 		}
 	});
 
+	context.subscriptions.push(animate);
 	context.subscriptions.push(start);
 }
 

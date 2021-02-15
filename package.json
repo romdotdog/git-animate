@@ -19,7 +19,7 @@
 			"properties": {
 				"gitanimate.playbackFolder": {
 					"type": "string",
-					"default": "%temp%/git-animate"
+					"default": "%appdata%/git-animate"
 				}
 			}
 		},
@@ -32,7 +32,7 @@
 			},
 			{
 				"command": "git-animate.start",
-				"enablement": "resourceFilename =~ .gitanimate.md",
+				"enablement": "resourceFilename =~ /\\.gitanimate\\.md/",
 				"category": "Animate",
 				"icon": "$(play-circle)",
 				"title": "Start animation"
