@@ -1,73 +1,204 @@
 import * as vscode from "vscode";
-import simpleGit, { SimpleGit, SimpleGitOptions } from "simple-git";
-import parseGitPatch from "parse-git-patch";
-import * as util from "util";
-import { execFile as _execFile } from "child_process";
-const execFile = util.promisify(_execFile);
+import simpleGit, {
+	DefaultLogFields,
+	ListLogLine,
+	SimpleGit,
+	SimpleGitOptions
+} from "simple-git";
+import parseGitPatch = require("parse-git-patch");
+
+import { basename } from "path";
+
+import { spawn } from "child_process";
+
+function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type Writeable<T> = { -readonly [P in keyof T]: T[P] };
 
 export function activate(context: vscode.ExtensionContext) {
 	let disposable = vscode.commands.registerCommand(
 		"git-animate.animate",
 		async () => {
-			// workbench.action.newWindow
-			if (
-				!vscode.workspace.workspaceFolders ||
-				!vscode.workspace.workspaceFolders.length
-			) {
-				return vscode.window.showErrorMessage(
-					`No repository is currently opened!`
-				);
-			}
-
-			if (vscode.workspace.workspaceFolders.length !== 1) {
-				return vscode.window.showErrorMessage(
-					`Please only have one folder in your workspace.`
-				);
-			}
-
-			const cwd = vscode.workspace.workspaceFolders[0].uri.fsPath;
-			const gitpath =
-				vscode.workspace.getConfiguration("git").get<string>("path") || "git";
-
-			const options: SimpleGitOptions = {
-				baseDir: cwd,
-				binary: gitpath,
-				maxConcurrentProcesses: 6,
-				config: []
-			};
-
-			const git: SimpleGit = simpleGit(options);
-			const log = await git.log(["--full-diff"]);
-
-			const uri = vscode.Uri.parse(`untitled:Commits`);
-			const doc = await vscode.workspace.openTextDocument(uri);
-
-			vscode.languages.setTextDocumentLanguage(doc, "markdown");
-			const commitEditor = await vscode.window.showTextDocument(doc, {
-				viewColumn: vscode.ViewColumn.Two,
-				preview: false
-			});
-
-			const editors: Record<string, vscode.TextEditor> = {};
-
-			for (let i = 0; i < log.all.length; i++) {
-				const commit = log.all[i];
-
-				let command =
-					i === 0
-						? `git log -u -1 ${commit.hash}`
-						: `git diff ${log.all[i - 1].hash} ${commit.hash}`;
-
-				const { stdout } = await execFile(command);
-				const patch = parseGitPatch(stdout);
-
-				// Add commit
-				commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
-					editBuilder.insert(
-						new vscode.Position(commitEditor.document.lineCount, 0),
-						`<${commit.author_name}>: ${commit.message}\n\n`
+			try {
+				// workbench.action.newWindow
+				if (
+					!vscode.workspace.workspaceFolders ||
+					!vscode.workspace.workspaceFolders.length
+				) {
+					return vscode.window.showErrorMessage(
+						`No repository is currently opened!`
 					);
+				}
+
+				if (vscode.workspace.workspaceFolders.length !== 1) {
+					return vscode.window.showErrorMessage(
+						`Please only have one folder in your workspace.`
+					);
+				}
+
+				const cwd = vscode.workspace.workspaceFolders[0].uri.fsPath;
+				const gitpath =
+					vscode.workspace.getConfiguration("git").get<string>("path") || "git";
+
+				const options: SimpleGitOptions = {
+					baseDir: cwd,
+					binary: gitpath,
+					maxConcurrentProcesses: 6,
+					config: []
+				};
+
+				const git: SimpleGit = simpleGit(options);
+				const log = await git.log();
+
+				const commitDoc = await vscode.workspace.openTextDocument(
+					vscode.Uri.parse(`untitled:Commits`)
+				);
+
+				await vscode.commands.executeCommand(
+					"workbench.action.closeAllEditors"
+				);
+
+				vscode.languages.setTextDocumentLanguage(commitDoc, "html");
+				const commitEditor = await vscode.window.showTextDocument(commitDoc, {
+					viewColumn: vscode.ViewColumn.Beside,
+					preview: false
 				});
+
+				const editors: Record<string, vscode.TextEditor> = {};
+
+				async function createEditor(path: string) {
+					const doc = await vscode.workspace.openTextDocument(
+						vscode.Uri.parse(`untitled:${basename(path).split(".")[0]}`)
+					);
+
+					return (editors[path] = await vscode.window.showTextDocument(doc, {
+						viewColumn: vscode.ViewColumn.Active,
+						preserveFocus: true,
+						preview: false
+					}));
+				}
+
+				console.log(`Got ${log.all.length} commits in log.`);
+				let commits = log.all as Writeable<(DefaultLogFields & ListLogLine)[]>; // why????
+				commits.reverse();
+
+				for (let i = 0; i < commits.length; i++) {
+					const commit = commits[i];
+					console.log(`Doing commit ${commit.hash}`);
+
+					// Add commit
+					commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
+						editBuilder.insert(
+							new vscode.Position(commitEditor.document.lineCount, 0),
+							`<${commit.author_name}>: ${commit.message}\n\n`
+						);
+					});
+
+					let args =
+						i === 0
+							? ["--no-pager", "format-patch", "--stdout", "-1", commit.hash]
+							: ["--no-pager", "diff", log.all[i - 1].hash, commit.hash];
+
+					console.log("Executing `git " + args.join(" ") + "`");
+
+					let stdout = "";
+					const spawned = spawn(gitpath, args, {
+						cwd
+					});
+
+					spawned.stdout!.on("data", (data) => {
+						stdout += data.toString();
+					});
+
+					await new Promise<void>((resolve, reject) => {
+						spawned.on("error", (err) => {
+							console.error(err);
+							reject(err);
+						});
+
+						spawned.on("exit", (code: number) => {
+							resolve();
+						});
+
+						spawned.on("close", (code: number) => {
+							resolve();
+						});
+					});
+
+					console.log(stdout);
+					const patch = parseGitPatch(stdout);
+					console.log(`Parsed with ${patch.files.length} files changed.`);
+
+					for (const file of patch.files) {
+						let editor = editors[file.beforeName];
+						if (!editor) {
+							editor = await createEditor(file.beforeName);
+						}
+
+						if (file.beforeName !== file.afterName) {
+							const newEditor = await createEditor(file.afterName);
+
+							newEditor.edit((editBuilder: vscode.TextEditorEdit) => {
+								editBuilder.insert(
+									new vscode.Position(0, 0),
+									editor.document.getText()
+								);
+							});
+
+							await vscode.commands.executeCommand(
+								"workbench.action.closeActiveEditor",
+								editor
+							);
+
+							editor = newEditor;
+						}
+
+						await vscode.window.showTextDocument(editor.document); // Focus
+						for (const line of file.modifiedLines) {
+							const jump = Math.abs(
+								editor.selection.active.line - line.lineNumber
+							);
+
+							await sleep(Math.min(300, jump * 5));
+
+							if (line.added) {
+								const lineWithNL = line.line + "\n";
+								// Insertion
+								for (
+									let charIndex = 0;
+									charIndex < lineWithNL.length;
+									charIndex++
+								) {
+									const char = lineWithNL[charIndex];
+									await editor.edit((editBuilder: vscode.TextEditorEdit) => {
+										editBuilder.insert(
+											new vscode.Position(line.lineNumber, charIndex),
+											char
+										);
+									});
+
+									await sleep(1);
+								}
+							} else {
+								// Delete
+								await editor.edit((editBuilder: vscode.TextEditorEdit) => {
+									editBuilder.delete(
+										new vscode.Range(
+											new vscode.Position(line.lineNumber, 0),
+											new vscode.Position(line.lineNumber, line.line.length)
+										)
+									);
+								});
+								await sleep(50);
+							}
+						}
+					}
+				}
+			} catch (err) {
+				console.error(err);
+				return vscode.window.showErrorMessage(err);
 			}
 		}
 	);

@@ -24,5 +24,6 @@ declare module "parse-git-patch" {
 		files: File[];
 	}
 
-	export default function parseGitPatch(patchString: string): Patch;
+	function parseGitPatch(patchString: string): Patch;
+	export = parseGitPatch;
 }
