@@ -208,10 +208,11 @@ You're good to go now, happy animating!`;
 
 			await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 
+			const commitFile = join(playbackProject, "Commits.xml");
+			await promises.writeFile(commitFile, "");
 			const commitDoc = await vscode.workspace.openTextDocument(
-				vscode.Uri.parse(`untitled:Commits`)
+				vscode.Uri.file(commitFile)
 			);
-			vscode.languages.setTextDocumentLanguage(commitDoc, "xml");
 
 			const documents: Record<string, vscode.TextDocument> = {};
 
@@ -324,28 +325,24 @@ You're good to go now, happy animating!`;
 						);
 
 						const visibleRange = editor.visibleRanges[0];
-						if (
-							visibleRange.end.line < line.lineNumber ||
-							visibleRange.start.line > line.lineNumber
-						) {
-							const targetLine = Math.max(line.lineNumber - 20, -1);
+						const targetLine = Math.max(line.lineNumber - 20, -1);
 
-							await vscode.commands.executeCommand("editorScroll", {
-								to: visibleRange.start.line > targetLine ? "up" : "down",
-								by: "line",
-								value: Math.abs(visibleRange.start.line - targetLine),
-								revealCursor: false
-							});
-						}
+						await vscode.commands.executeCommand("editorScroll", {
+							to: visibleRange.start.line > targetLine ? "up" : "down",
+							by: "line",
+							value: Math.abs(visibleRange.start.line - targetLine),
+							revealCursor: false
+						});
 
 						await sleep(Math.min(300, jump * 5));
 
 						line.lineNumber--; // Patch is ahead by one line
 						let lineNumber = line.lineNumber - 1; // Position is zero-based
 						if (line.added) {
-							const [, leadingWhite, lineContent] = (line.line + "\n").match(
-								/^(\s*)(.*)/s
-							)!;
+							console.log(`Inserting "${line.line}" at ${line.lineNumber}`);
+							const [, leadingWhite, lineContent] = (
+								line.line.trimEnd() + "\n"
+							).match(/^(\s*)(.*)/s)!;
 
 							await editor.edit((editBuilder: vscode.TextEditorEdit) => {
 								editBuilder.insert(
@@ -384,6 +381,17 @@ You're good to go now, happy animating!`;
 								new vscode.Position(lineNumber + 1, 0)
 							);
 
+							// Check if out of sync
+							const expected = line.line.trim();
+							const actual = editor.document.getText(range).trim();
+							if (actual !== expected) {
+								console.log(
+									`Expected \`${expected}\` at line ${lineNumber + 1} (${
+										line.lineNumber
+									} - ${linesDeleted} + ${linesAdded}), got \`${actual}\``
+								);
+								return;
+							}
 							editor.selection = new vscode.Selection(range.start, range.end);
 
 							await sleep(100);
@@ -398,7 +406,7 @@ You're good to go now, happy animating!`;
 					}
 
 					// Save file
-					editor.document.save();
+					await editor.document.save();
 				}
 
 				// Add commit to log
@@ -407,12 +415,14 @@ You're good to go now, happy animating!`;
 					preview: false
 				});
 
-				commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
+				await commitEditor.edit((editBuilder: vscode.TextEditorEdit) => {
 					editBuilder.insert(
 						new vscode.Position(commitEditor.document.lineCount, 0),
 						`<${commit.author_name}>: ${commit.message}\n\n`
 					);
 				});
+
+				await commitDoc.save();
 			}
 		} catch (err) {
 			console.error(err);

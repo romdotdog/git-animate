@@ -25,7 +25,8 @@
 				"gitanimate.defaultWorkspaceJSON": {
 					"type": "object",
 					"default": {
-						"editor.wordWrap": "on"
+						"editor.wordWrap": "on",
+						"editor.formatOnSave": false
 					}
 				}
 			}
