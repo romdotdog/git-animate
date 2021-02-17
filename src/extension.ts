@@ -13,6 +13,8 @@ import { promises } from "fs";
 import { parseGitPatch, Line } from "parse-git-patch";
 import { compile as parseGitIgnore } from "gitignore-parser";
 
+import { removeEmptyDirectories } from "./remove-empty-directories";
+
 function chunk<T>(arr: T[], len: number): T[][] {
 	var chunks = [],
 		i = 0,
@@ -377,22 +379,20 @@ You're good to go now, happy animating!`;
 						doc = await createDocument(fullPath);
 					}
 
+					if (file.deleted) {
+						await doc.save();
+						await promises.unlink(fullPath);
+
+						// Remove directories that are empty
+						await removeEmptyDirectories(playbackProject);
+						continue;
+					}
+
 					let editor = await vscode.window.showTextDocument(doc, {
 						viewColumn: vscode.ViewColumn.One
 					});
 
 					console.log(file);
-
-					if (file.deleted) {
-						await editor.document.save();
-						await vscode.commands.executeCommand(
-							"workbench.action.closeActiveEditor",
-							editor
-						);
-
-						await promises.unlink(fullPath);
-						continue;
-					}
 
 					if (file.beforeName !== file.afterName) {
 						await editor.document.save();
@@ -409,6 +409,9 @@ You're good to go now, happy animating!`;
 							{ recursive: true }
 						);
 						await promises.rename(fullPath, newPath);
+
+						// Remove directories that are empty
+						await removeEmptyDirectories(playbackProject);
 
 						const newEditor = await vscode.window.showTextDocument(
 							await createDocument(newPath),
