@@ -10,7 +10,7 @@ import { spawn } from "child_process";
 import { join, relative, resolve, isAbsolute, dirname } from "path";
 import { promises } from "fs";
 
-import parseGitPatch from "parse-git-patch";
+import { parseGitPatch, Line } from "parse-git-patch";
 import { compile as parseGitIgnore } from "gitignore-parser";
 
 function chunk<T>(arr: T[], len: number): T[][] {
@@ -47,6 +47,57 @@ function isChildOf(child: string, parent: string): boolean {
 }
 
 type Writeable<T> = { -readonly [P in keyof T]: T[P] };
+
+interface UnfinishedDeletedLineGroup {
+	from?: number;
+	to?: number;
+	content?: string;
+}
+
+interface DeletedLineGroup {
+	from: number;
+	to: number;
+	content: string;
+}
+
+function isDeletedLineGroup(
+	obj: UnfinishedDeletedLineGroup | Line
+): obj is DeletedLineGroup {
+	obj = obj as UnfinishedDeletedLineGroup;
+	return !!(obj.from && obj.to && obj.content);
+}
+
+// Chunk deleted lines together so we don't have to delete a huge block line by line
+function* chunkDeleted(
+	iterator: IterableIterator<Line>
+): Generator<DeletedLineGroup | Line, void> {
+	let deletedBuilder: UnfinishedDeletedLineGroup = {};
+	while (true) {
+		const next = iterator.next();
+		if (
+			isDeletedLineGroup(deletedBuilder) &&
+			(next.done ||
+				next.value.added ||
+				next.value.lineNumber !== deletedBuilder.to + 1) // either no next line, next line is inserting, or next line doesn't continue the line group.
+		) {
+			yield deletedBuilder;
+			deletedBuilder = {};
+		}
+
+		if (next.done) {
+			break;
+		}
+
+		if (next.value.added) {
+			yield next.value;
+		} else {
+			deletedBuilder.from = deletedBuilder.from || next.value.lineNumber;
+			deletedBuilder.to = next.value.lineNumber;
+			deletedBuilder.content =
+				(deletedBuilder.content || "") + next.value.line + "\n";
+		}
+	}
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	let animate = vscode.commands.registerCommand(
@@ -353,6 +404,10 @@ You're good to go now, happy animating!`;
 						delete documents[fullPath];
 
 						const newPath = join(playbackProject, file.afterName);
+						await promises.mkdir(
+							dirname(newPath), // create all directories for the path
+							{ recursive: true }
+						);
 						await promises.rename(fullPath, newPath);
 
 						const newEditor = await vscode.window.showTextDocument(
@@ -368,19 +423,60 @@ You're good to go now, happy animating!`;
 
 					let linesDeleted = 0;
 					let linesAdded = 0;
-					for (const line of file.modifiedLines) {
-						line.lineNumber--; // Patch is ahead by one line
-						let lineNumber = line.lineNumber - 1; // Position is zero-based
 
+					const lineIterator = file.modifiedLines[Symbol.iterator]();
+					for (const line of chunkDeleted(lineIterator)) {
 						const jump = Math.abs(
-							editor.selection.active.line - line.lineNumber
+							editor.selection.active.line -
+								(isDeletedLineGroup(line) ? line.from : line.lineNumber)
 						);
-
 						const visibleRange = editor.visibleRanges[0];
 
 						await sleep(Math.min(300, jump * 5));
 
-						if (line.added) {
+						if (isDeletedLineGroup(line)) {
+							// Delete section
+
+							// Patch is ahead by one line
+							line.from--;
+							line.to--;
+
+							line.from -= linesDeleted - linesAdded;
+							line.to -= linesDeleted - linesAdded;
+
+							updateScroll(visibleRange, line.to);
+
+							const range = new vscode.Range(
+								new vscode.Position(line.from - 1, 0), // lines start at 0 in positions
+								new vscode.Position(line.to, 0)
+							);
+
+							// Check if out of sync
+							const expected = line.content.replace(/\s+/g, "");
+							const actual = editor.document.getText(range).replace(/\s+/g, "");
+							// I'm stripping all whitespace because I've had an occurrence where the two strings were equal
+							// in the interpreter yet this if statement returned true
+							if (actual !== expected) {
+								console.log(
+									`Expected \`${expected}\` at line ${line.from} - ${line.to} (- ${linesDeleted} + ${linesAdded}), got \`${actual}\``
+								);
+								return;
+							}
+							editor.selection = new vscode.Selection(range.start, range.end);
+
+							await sleep(100);
+
+							// Delete
+							await editor.edit((editBuilder: vscode.TextEditorEdit) => {
+								editBuilder.delete(range);
+							});
+
+							linesDeleted += line.to - (line.from - 1);
+						} else {
+							line.lineNumber--; // Patch is ahead by one line
+							let lineNumber = line.lineNumber - 1; // Position is zero-based
+
+							// Insert line
 							console.log(`Inserting "${line.line}" at ${line.lineNumber}`);
 							updateScroll(visibleRange, lineNumber);
 
@@ -418,36 +514,6 @@ You're good to go now, happy animating!`;
 							}
 
 							linesAdded++;
-						} else {
-							lineNumber -= linesDeleted - linesAdded;
-							updateScroll(visibleRange, lineNumber);
-
-							const range = new vscode.Range(
-								new vscode.Position(lineNumber, 0),
-								new vscode.Position(lineNumber + 1, 0)
-							);
-
-							// Check if out of sync
-							const expected = line.line.trim();
-							const actual = editor.document.getText(range).trim();
-							if (actual !== expected) {
-								console.log(
-									`Expected \`${expected}\` at line ${lineNumber + 1} (${
-										line.lineNumber
-									} - ${linesDeleted} + ${linesAdded}), got \`${actual}\``
-								);
-								return;
-							}
-							editor.selection = new vscode.Selection(range.start, range.end);
-
-							await sleep(100);
-
-							// Delete
-							await editor.edit((editBuilder: vscode.TextEditorEdit) => {
-								editBuilder.delete(range);
-							});
-
-							linesDeleted++;
 						}
 					}
 
