@@ -5,12 +5,13 @@ import simpleGit, {
 	SimpleGit,
 	SimpleGitOptions
 } from "simple-git";
-import parseGitPatch = require("parse-git-patch");
 import { spawn } from "child_process";
 
 import { join, relative, resolve, isAbsolute, dirname } from "path";
 import { promises } from "fs";
-import { config } from "process";
+
+import parseGitPatch from "parse-git-patch";
+import { compile as parseGitIgnore } from "gitignore-parser";
 
 function chunk<T>(arr: T[], len: number): T[][] {
 	var chunks = [],
@@ -84,6 +85,14 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 			);
 
+			const cwd = vscode.workspace.workspaceFolders[0].uri.fsPath;
+
+			if (isChildOf(cwd, playbackFolder)) {
+				return vscode.window.showErrorMessage(
+					`Cannot visualize a git-animate folder.`
+				);
+			}
+
 			const dest = resolve(
 				join(playbackFolder, vscode.workspace.workspaceFolders[0].name)
 			);
@@ -94,7 +103,6 @@ export function activate(context: vscode.ExtensionContext) {
 			console.log("Done clearing, now making directory..");
 			await promises.mkdir(dest, { recursive: true });
 
-			const cwd = vscode.workspace.workspaceFolders[0].uri.fsPath;
 			const out = `${cwd}
 
 ## Welcome to your git-animate project!
@@ -106,10 +114,18 @@ Make sure you're focused on this file, type \`CTRL+SHIFT+P\`, then select \`Anim
 
 You're good to go now, happy animating!`;
 
-			console.log("Making .gitanimate.md..");
+			console.log("Making .gitanimate.md and .gitignore..");
 			await promises.writeFile(join(dest, ".gitanimate.md"), out, {
 				encoding: "utf8"
 			});
+
+			await promises.writeFile(
+				join(dest, ".gitignore"),
+				"# Here, you can specify globs that will be entirely ignored during animation.\n# LICENSE\n# /*.json",
+				{
+					encoding: "utf8"
+				}
+			);
 
 			console.log("Making settings.json..");
 			await promises.mkdir(join(dest, ".vscode"));
@@ -204,6 +220,14 @@ You're good to go now, happy animating!`;
 
 			const playbackProject = vscode.workspace.workspaceFolders[0].uri.fsPath;
 
+			const gitignorePath = join(playbackProject, ".gitignore");
+			const gitignore = parseGitIgnore(
+				await promises.readFile(gitignorePath, { encoding: "utf-8" })
+			);
+
+			// delete .gitignore
+			await promises.unlink(gitignorePath);
+
 			const gitpath =
 				vscode.workspace.getConfiguration("git").get<string>("path") || "git";
 
@@ -277,7 +301,19 @@ You're good to go now, happy animating!`;
 
 				const patch = parseGitPatch(stdout);
 
+				const renamedIgnore = new Set<string>([]); // if ignored files are renamed, we still need to ignore them
+
 				for (const file of patch.files) {
+					if (
+						renamedIgnore.has(file.beforeName) ||
+						renamedIgnore.has(file.afterName) ||
+						gitignore.denies(file.beforeName)
+					) {
+						renamedIgnore.add(file.beforeName);
+						renamedIgnore.add(file.afterName);
+						continue;
+					}
+
 					let fullPath = join(playbackProject, file.beforeName);
 					let doc = documents[fullPath];
 
