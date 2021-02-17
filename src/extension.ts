@@ -28,6 +28,17 @@ function sleep(ms: number) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function updateScroll(visibleRange: vscode.Range, lineNumber: number) {
+	const targetLine = Math.max(lineNumber - 20, -1);
+
+	await vscode.commands.executeCommand("editorScroll", {
+		to: visibleRange.start.line > targetLine ? "up" : "down",
+		by: "line",
+		value: Math.abs(visibleRange.start.line - targetLine),
+		revealCursor: false
+	});
+}
+
 // https://stackoverflow.com/questions/37521893/determine-if-a-path-is-subdirectory-of-another-in-node-js
 function isChildOf(child: string, parent: string): boolean {
 	const r = relative(parent, child);
@@ -283,6 +294,8 @@ You're good to go now, happy animating!`;
 						viewColumn: vscode.ViewColumn.One
 					});
 
+					console.log(file);
+
 					if (file.deleted) {
 						await editor.document.save();
 						await vscode.commands.executeCommand(
@@ -320,26 +333,21 @@ You're good to go now, happy animating!`;
 					let linesDeleted = 0;
 					let linesAdded = 0;
 					for (const line of file.modifiedLines) {
+						line.lineNumber--; // Patch is ahead by one line
+						let lineNumber = line.lineNumber - 1; // Position is zero-based
+
 						const jump = Math.abs(
 							editor.selection.active.line - line.lineNumber
 						);
 
 						const visibleRange = editor.visibleRanges[0];
-						const targetLine = Math.max(line.lineNumber - 20, -1);
-
-						await vscode.commands.executeCommand("editorScroll", {
-							to: visibleRange.start.line > targetLine ? "up" : "down",
-							by: "line",
-							value: Math.abs(visibleRange.start.line - targetLine),
-							revealCursor: false
-						});
 
 						await sleep(Math.min(300, jump * 5));
 
-						line.lineNumber--; // Patch is ahead by one line
-						let lineNumber = line.lineNumber - 1; // Position is zero-based
 						if (line.added) {
 							console.log(`Inserting "${line.line}" at ${line.lineNumber}`);
+							updateScroll(visibleRange, lineNumber);
+
 							const [, leadingWhite, lineContent] = (
 								line.line.trimEnd() + "\n"
 							).match(/^(\s*)(.*)/s)!;
@@ -376,6 +384,8 @@ You're good to go now, happy animating!`;
 							linesAdded++;
 						} else {
 							lineNumber -= linesDeleted - linesAdded;
+							updateScroll(visibleRange, lineNumber);
+
 							const range = new vscode.Range(
 								new vscode.Position(lineNumber, 0),
 								new vscode.Position(lineNumber + 1, 0)

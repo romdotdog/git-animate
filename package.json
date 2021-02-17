@@ -78,7 +78,7 @@
 		"vscode-test": "^1.3.0"
 	},
 	"dependencies": {
-		"parse-git-patch": "^1.0.7",
+		"parse-git-patch": "github:romdotdog/parse-git-patch",
 		"simple-git": "^2.34.2"
 	}
 }
